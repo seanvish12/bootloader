@@ -21,4 +21,4 @@ halt:
 
 message db "Hello from the kernel!", 0
 
-times 512-($-$$) db 0
+times 1536-($-$$) db 0
