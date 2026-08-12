@@ -39,7 +39,8 @@ load:
     mov bx, 0x7E00 ; Where to put the next sector at in the Ram (Es:bx)
     
     int 0x13 ; Bios's disk interruption
-    jc disk_error ; if CF == 1 the operation failed
+    jc disk_error ; if CF == 1 the operation failed 
+    mov [0x0500], dl
     jmp 0x0000:0x7E00
 
 
