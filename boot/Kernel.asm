@@ -3,19 +3,25 @@ ORG 0x8000
 
 jmp start
 
-print:    
-    lodsb
-    cmp al, 0
-    je .done
+print:
+    push bp
+    mov bp, sp
     
-    mov byte [es:di], al
-    mov byte [es:di + 1], 0x07
-    add di, 2  
-    jmp print
+    mov si, [bp + 4]
+    .print:    
+        lodsb
+        cmp al, 0
+        je .done
+        
+        mov byte [es:di], al
+        mov byte [es:di + 1], 0x07
+        add di, 2  
+    jmp .print
     
     .done:
+        mov sp, bp
+        pop bp 
         ret
-
 
 start:
     
@@ -33,10 +39,11 @@ start:
     xor ax, ax
     mov DS, ax
     
-    mov si, message
     mov di, 0 
     
+    push message
     call print
+    add sp, 2
 
 halt:
     cli
