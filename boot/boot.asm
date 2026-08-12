@@ -10,7 +10,9 @@ start:
     mov ss, ax
     mov sp, 0x7C00
 
-    sti
+    sti  
+    
+    mov [boot_drive], dl
 
     mov si, message
 print:
@@ -26,7 +28,9 @@ done:
     cli
     hlt
 
-message db "Hello from my OS!", 0
+message db "Hello from my OS!", 0  
+
+boot_drive db 0
 
 times 510-($-$$) db 0
 dw 0xAA55
