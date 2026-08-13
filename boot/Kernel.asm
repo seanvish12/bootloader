@@ -57,15 +57,31 @@ print:
         pop bp
         ret
 
-keyboard_test:
+keyboard_handler:
     push ax
+    push bx
+    push cx
+    push si
+    push di
+    push es
 
-    push 0x07               ; white text, black background
-    push interrupt_message            ; pass string address
+    in al, 0x60       ; read keyboard scancode
+
+    push 0x07
+    push interrupt_message
     call print
-    add sp, 4               ; remove arguments
+    add sp, 4
+    
+    mov al, 0x20
+    out 0x20, al      ; send EOI to PIC
 
+    pop es
+    pop di
+    pop si
+    pop cx
+    pop bx
     pop ax
+    
     iret
 
 start:
@@ -78,8 +94,13 @@ start:
     xor ax, ax
     mov ds, ax              ; data segment = 0
     
-    mov word [ds:0x180], keyboard_test ; IP
-    mov word [ds:0x182], 0             ; CS 
+    mov word [ds:0x24], keyboard_handler ; IP
+    mov word [ds:0x26], 0             ; CS
+    
+    ; Unmask IRQ1
+    in al, 0x21
+    and al, 0xFD
+    out 0x21, al 
     
     sti                     ; enable interrupts
 
@@ -87,12 +108,10 @@ start:
     push message             ; pass string address
     call print
     add sp, 4               ; remove arguments
-    
-    int 0x60
 
 halt:
-    cli
     hlt                     ; stop until an interrupt occurs
+    jmp halt
 
 cursor dw 0
 cursor_col dw 0
