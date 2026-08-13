@@ -20,7 +20,7 @@ jmp 0x0000:0x8000   ; Jump to kernel
 disk_address_packet:
     db 0x10          ; DAP size = 16 bytes
     db 0             ; Reserved
-    dw 3             ; Read 1 sector
+    dw 3             ; Read 3 sectors
     dw 0x8000        ; Destination offset
     dw 0             ; Destination segment
     dq 2             ; Starting LBA = 2 (kernel)
