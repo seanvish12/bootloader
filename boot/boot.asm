@@ -3,12 +3,19 @@ ORG 0x7C00
 
 start:
     cli
-
+    
+    ; In real mode, a physical address is calculated as:
+    ; physical address = segment * 16 + offset
+    ;
+    ; We initialize the segments to 0, so the segment contributes
+    ; nothing to the address. This gives us a simple and predictable
+    ; memory layout where segment:offset directly corresponds to the offset.
+    
     xor ax, ax
     mov ds, ax
     mov es, ax
     mov ss, ax
-    mov sp, 0x7C00
+    mov sp, 0x7C00  ; starting address of the bootloader's stack    
 
     sti  
     
@@ -17,12 +24,12 @@ start:
     
 load:
 
-    mov ah, 0x42     ; BIOS INT 13h extended disk read function    
+    mov ah, 0x42     ; BIOS INT 13h disk read function    
     mov dl, [0x0500] ; Restore the boot drive number
     
     mov si, disk_address_packet ; DS:SI now points to our DAP
-    int 0x13 ; Ask the BIOS to perform the disk read
-    jc disk_error ; If Carry Flag = 1, the BIOS reported an error  
+    int 0x13                ; Ask the BIOS to perform the disk read
+    jc disk_error           ; If Carry Flag = 1, the BIOS reported an error  
     jmp 0x0000:0x7E00  
     
 disk_address_packet:
