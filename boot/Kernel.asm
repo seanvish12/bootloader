@@ -1,16 +1,21 @@
-BITS 16
+BITS 32
 ORG 0x8000
 
 jmp start
 
+idt_start:
+    times 256 dq 0
+idt_end:
+
+idt_descriptor:
+    dw idt_end - idt_start - 1
+    dd idt_start
+
 print_char:
-    push bp
-    mov bp, sp
+    push ebp
+    mov ebp, esp
     
-    mov bx, 0xB800
-    mov es, bx             ; ES -> VGA text memory
-    
-    mov di, [cursor]       ; start at current cursor
+    mov edi, [cursor]    ; start at current cursor
     
     cmp al, 10          ; 10 = new line character
     je .new_line        ; handle newline
@@ -18,11 +23,11 @@ print_char:
     cmp al, 8           ; 8 = backspace
     je .delete
     
-    mov byte [es:di], al ; character
-    mov byte [es:di + 1], ah ; color attribute
-    add di, 2           ; next character (2 bytes)
+    mov byte [0xB8000 + edi], al ; character
+    mov byte [0xB8001 + edi], ah ; color attribute
+    add edi, 2                   ; next character (2 bytes)
     
-    cmp di, 4000
+    cmp edi, 4000
     jae .reset          ; reached end of screen
     
     inc word [cursor_col]
@@ -32,22 +37,24 @@ print_char:
     jmp .done 
     
     .new_line:
-        mov cx, 80
-        sub cx, [cursor_col] ; remaining columns
-        shl cx, 1            ; each char on screen is 2 bytes
-        add di, cx           ; move to next line
-        mov [cursor_col], 0   ; reset column
-        cmp di, 4000
-        jae .reset          ; reached end of screen
+        movzx ecx, word [cursor_col]
+        mov eax, 80
+        sub eax, ecx            ; remaining columns
+        shl eax, 1              ; each char on screen is 2 bytes
+        add edi, eax            ; move to next line
+        mov word [cursor_col], 0     ; reset column
+        
+        cmp edi, 4000
+        jae .reset              ; reached end of screen
         jmp .done
         
     .delete:
-        cmp di, 0
+        cmp edi, 0
         je .done
     
-        sub di, 2
-        mov byte [es:di], 0 
-        mov byte [es:di + 1], 0
+        sub edi, 2
+        mov byte [0xB8000 + edi], 0 
+        mov byte [0xB8001 + edi], 0
         
         cmp word [cursor_col], 0
         jne .not_prev_line
@@ -60,26 +67,25 @@ print_char:
      
         
     .reset:
-        xor di, di            ; back to top-left
-
+        xor edi, edi            ; back to top-left
     .reset_col:
         mov word [cursor_col], 0   ; reset column    
     
     
     .done:
-        mov [cursor], di       ; save new cursor position
+        mov [cursor], edi       ; save new cursor position
     
-    mov sp, bp
-    pop bp
+    mov esp, ebp
+    pop ebp
     ret
 
 
 print:
-    push bp
-    mov bp, sp
+    push ebp
+    mov ebp, esp
 
-    mov ah, [bp + 6]       ; get text attribute
-    mov si, [bp + 4]       ; get string address
+    mov ah, [ebp + 10]       ; get text attribute
+    mov esi, [ebp + 8]       ; get string address
     
     .print:
         lodsb              ; AL = next character
@@ -92,18 +98,19 @@ print:
 
         
      .finished:   
-        mov sp, bp
-        pop bp
+        mov esp, ebp
+        pop ebp
         ret
+        
 
 keyboard_handler:
-    push ax
-    push bx
-    push cx
+    push eax
+    push ebx
+    push ecx
 
     in al, 0x60                  ; AL = scancode
 
-    xor bx, bx
+    xor ebx, ebx
     mov bl, [keyboard_write_pos] ; BL = current position
 
     mov cl, bl
@@ -113,47 +120,81 @@ keyboard_handler:
     cmp cl, [keyboard_read_pos]
     je .buffer_full
 
-    mov [keyboard_buffer + bx], al
+    mov [keyboard_buffer + ebx], al
     mov [keyboard_write_pos], cl
 
     .buffer_full:
         mov al, 0x20
         out 0x20, al
     
-        pop cx
-        pop bx
-        pop ax
+        pop ecx
+        pop ebx
+        pop eax
         iret
 
 
 start:
-    cli                     ; disable interrupts during setup
+    
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    
+    mov ebx, keyboard_handler
+    
+    mov word [idt_start + 0x108], bx
+    mov word [idt_start + 0x10A], 0x08
+    mov byte [idt_start + 0x10C], 0
+    mov byte [idt_start + 0x10D], 10001110b
+    shr ebx, 16
+    mov word [idt_start + 0x10E], bx
+   
+    
+    lidt [idt_descriptor]   ; load the IDT address onto the cpu
+   
+    mov al, 0x11        ; reconfiguration mode
 
-    xor ax, ax
-    mov ss, ax              ; stack segment = 0
-    mov sp, 0x9000          ; stack grows downward from here
+    out 0x20, al        ; Master PIC(command) -> IRQ0 - IRQ7
+    out 0xA0, al        ; Slave PIC(command) -> IRQ8 - IRQ15
+    
+    mov al, 0x20        ; IRQ0 -> 0x20
+    out 0x21, al        ; Master PIC(data)
+                        
+    mov al, 0x28        ; IRQ8 -> 0x28
+    out 0xA1, al        ; Slave PIC(data)
+    
+    mov al, 0x04        ; Slave PIC connected to Master's IRQ2.
+    out 0x21, al
+    
+    mov al, 0x02        ; connected to IRQ2 on the master.
+    out 0xA1, al
+    
+    mov al, 0x01        ; 8086/88 mode
 
-    xor ax, ax
-    mov ds, ax              ; data segment = 0
+    out 0x21, al
+    out 0xA1, al
     
-    mov word [ds:0x24], keyboard_handler ; IP
-    mov word [ds:0x26], 0             ; CS
+    mov al, 11111101b        ; IRQ1 allowed all other blocked
+    out 0x21, al
     
-    ; Unmask IRQ1, second index is keyboard requests
-    in al, 0x21
-    and al, 0xFD
-    out 0x21, al 
+    mov al, 11111111b
+    out 0xA1, al
     
-    sti                     ; enable interrupts
+    mov esp, 0xA000          ; stack grows downward from here
+                
+    sti
+    
 
 main_loop:
     mov al, [keyboard_read_pos]
     cmp al, [keyboard_write_pos]
     je main_loop    ; theres nothing to read from the buffer currently
 
-    xor bx, bx
+    xor ebx, ebx
     mov bl, [keyboard_read_pos]     ; current read from buffer index    
-    mov al, [keyboard_buffer + bx]
+    mov al, [keyboard_buffer + ebx]
     
     cmp al, 0x2A                ; left shift press        
     je .shift_press
@@ -207,9 +248,9 @@ main_loop:
     inc byte [keyboard_read_pos]
     and byte [keyboard_read_pos], 0x0F  ; read pos = (read pos + 1) % 16 
 
-    xor bx, bx
+    xor ebx, ebx
     mov bl, al
-    mov al, [scancode_table + bx]
+    mov al, [scancode_table + ebx]
     
     cmp al, 0
     je main_loop
@@ -301,7 +342,7 @@ scancode_table:
 shift_pressed db 0
 caps_lock db 0
 
-cursor dw 0
+cursor dd 0
 cursor_col dw 0  
 
 keyboard_buffer times 16 db 0
@@ -309,4 +350,4 @@ keyboard_write_pos db 0
 keyboard_read_pos  db 0
                       
 a_message db "A", 0
-times 1536-($-$$) db 0
+times 4096-($-$$) db 0
