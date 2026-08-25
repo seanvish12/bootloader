@@ -190,96 +190,9 @@ timer_handler:
     out 0x20, al
     pop eax
     iret
-
-
-start:
-    
-    mov ax, 0x10
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-    mov ss, ax
-    xor ecx, ecx    ; for later use
-    
-    mov ebx, keyboard_handler
-    
-    mov word [idt_start + 0x108], bx
-    mov word [idt_start + 0x10A], 0x08
-    mov byte [idt_start + 0x10C], 0
-    mov byte [idt_start + 0x10D], 10001110b
-    shr ebx, 16
-    mov word [idt_start + 0x10E], bx
-    
-    mov ebx, timer_handler
-    
-    mov word [idt_start + 0x100], bx
-    mov word [idt_start + 0x102], 0x08
-    mov byte [idt_start + 0x104], 0
-    mov byte [idt_start + 0x105], 10001110b
-    shr ebx, 16
-    mov word [idt_start + 0x106], bx  
-   
-    
-    lidt [idt_descriptor]   ; load the IDT address onto the cpu
-    
-    ; ---------------- PIC ----------------
-   
-    mov al, 0x11        ; reconfiguration mode
-
-    out 0x20, al        ; Master PIC(command) -> IRQ0 - IRQ7
-    out 0xA0, al        ; Slave PIC(command) -> IRQ8 - IRQ15
-    
-    mov al, 0x20        ; IRQ0 -> 0x20
-    out 0x21, al        ; Master PIC(data)
-                        
-    mov al, 0x28        ; IRQ8 -> 0x28
-    out 0xA1, al        ; Slave PIC(data)
-    
-    mov al, 0x04        ; Slave PIC connected to Master's IRQ2.
-    out 0x21, al
-    
-    mov al, 0x02        ; connected to IRQ2 on the master.
-    out 0xA1, al
-    
-    mov al, 0x01        ; 8086/88 mode
-
-    out 0x21, al
-    out 0xA1, al
-    
-    mov al, 11111100b       ; IRQ0 + IRQ1 enabled allowed all other blocked
-    out 0x21, al
-    
-    mov al, 11111111b       ; All slave IRQs disabled
-    out 0xA1, al
-    
-    ; ---------------- PIT ----------------
-    
-    mov al, 0x36
-    out 0x43, al
-    
-    mov ax, 0x2E9B
-    out 0x40, al
-    mov al, ah
-    out 0x40, al
-    
-    ; ---------------- Stack ----------------
-    
-    mov esp, 0xA000          ; stack grows downward from here
-                
-    sti
-    
-
-main_loop:
-    
-    xor ebx, ebx
-    xor eax, eax
-    xor edx, edx 
-
-    mov al, [keyboard_read_pos]
-    cmp al, [keyboard_write_pos]
-    je main_loop    ; theres nothing to read from the buffer currently
-
+               
+               
+keyboard_print:
     xor ebx, ebx
     mov bl, [keyboard_read_pos]     ; current read from buffer index    
     mov al, [keyboard_buffer + ebx]
@@ -361,6 +274,119 @@ main_loop:
     
     mov ah, 0x07
     call print_char
+    jmp main_loop
+    
+sleep:
+    push ebp
+    mov ebp, esp
+    pusha
+    
+    mov eax, [ebp + 8]
+    mov ebx, 100
+    mul ebx
+    
+    mov ecx, [timer_ticks]
+    
+    .lp:
+        hlt
+        mov edx, [timer_ticks]
+        sub edx, ecx
+        cmp edx, eax
+        jl .lp
+        
+    popa    
+    mov esp, ebp
+    pop ebp
+    ret 
+
+start:
+
+
+initialize:    
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    
+    xor ecx, ecx    ; for later use
+    xor ebx, ebx
+    xor eax, eax
+
+idt_configuration:    
+    mov ebx, keyboard_handler
+    
+    mov word [idt_start + 0x108], bx
+    mov word [idt_start + 0x10A], 0x08
+    mov byte [idt_start + 0x10C], 0
+    mov byte [idt_start + 0x10D], 10001110b
+    shr ebx, 16
+    mov word [idt_start + 0x10E], bx
+    
+    mov ebx, timer_handler
+    
+    mov word [idt_start + 0x100], bx
+    mov word [idt_start + 0x102], 0x08
+    mov byte [idt_start + 0x104], 0
+    mov byte [idt_start + 0x105], 10001110b
+    shr ebx, 16
+    mov word [idt_start + 0x106], bx  
+   
+    
+    lidt [idt_descriptor]   ; load the IDT address onto the cpu
+    
+
+pic_configuration:   
+    mov al, 0x11        ; reconfiguration mode
+
+    out 0x20, al        ; Master PIC(command) -> IRQ0 - IRQ7
+    out 0xA0, al        ; Slave PIC(command) -> IRQ8 - IRQ15
+    
+    mov al, 0x20        ; IRQ0 -> 0x20
+    out 0x21, al        ; Master PIC(data)
+                        
+    mov al, 0x28        ; IRQ8 -> 0x28
+    out 0xA1, al        ; Slave PIC(data)
+    
+    mov al, 0x04        ; Slave PIC connected to Master's IRQ2.
+    out 0x21, al
+    
+    mov al, 0x02        ; connected to IRQ2 on the master.
+    out 0xA1, al
+    
+    mov al, 0x01        ; 8086/88 mode
+
+    out 0x21, al
+    out 0xA1, al
+    
+    mov al, 11111100b       ; IRQ0 + IRQ1 enabled allowed all other blocked
+    out 0x21, al
+    
+    mov al, 11111111b       ; All slave IRQs disabled
+    out 0xA1, al
+
+pit_configuration:
+    mov al, 0x36          ; PIT: channel 0, low byte then high byte, mode 3 (square wave)
+    out 0x43, al           ; Send configuration command to PIT command port
+
+    mov ax, 0x2E9B        ; Timer divisor = 11931 ? approximately 100 Hz
+    out 0x40, al           ; Send low byte of divisor to PIT channel 0
+    mov al, ah
+    out 0x40, al           ; Send high byte of divisor to PIT channel 0
+    
+    ; ---------------- Stack ----------------
+    
+    mov esp, 0xA000          ; stack grows downward from here
+                
+    sti
+    
+
+main_loop: 
+
+    mov al, [keyboard_read_pos]
+    cmp al, [keyboard_write_pos]
+    jne keyboard_print    ; theres a value to read from the buffer currently
 
     jmp main_loop
     
@@ -426,19 +452,15 @@ scancode_table:
     db ' '                ; 0x39 Space
     db 0                  ; 0x3A Caps Lock                       
 
-last_timer_tick dd 0
 timer_ticks dd 0
 shift_pressed db 0
 caps_lock db 0
 
 cursor dd 0
-cursor_col dw 0
-
-seconds dd 0  
+cursor_col dw 0  
 
 keyboard_buffer times 16 db 0
 keyboard_write_pos db 0
 keyboard_read_pos  db 0
                       
-a_message db "A", 0
 times 4096-($-$$) db 0
