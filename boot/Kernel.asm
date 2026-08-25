@@ -12,7 +12,7 @@ idt_descriptor:
     dd idt_start
 
 print_char:
-    push ebp
+    pusha
     mov ebp, esp
     
     mov edi, [cursor]    ; start at current cursor
@@ -76,7 +76,7 @@ print_char:
         mov [cursor], edi       ; save new cursor position
     
     mov esp, ebp
-    pop ebp
+    popa
     ret
 
 
@@ -102,6 +102,55 @@ print:
         pop ebp
         ret
         
+print_int:
+    push ebp
+    mov ebp, esp
+    
+    mov eax, [ebp + 8]      ; the number itself
+    cmp eax, 0
+    jne .not_zero
+     
+    mov al, '0'
+    mov ah, 0x07
+    call print_char
+    jmp .finish_int_print 
+    
+    .not_zero:
+    mov ecx, eax
+    xor edi, edi
+    
+    .dissasemble_number:
+        cmp ecx, 0
+        je .send_for_print
+        
+        mov eax, ecx
+        xor edx, edx
+        mov ebx, 10
+        div ebx     ; edx now contains the last digit
+        
+        add edx, 48
+        push edx
+        mov ecx, eax
+        inc edi
+        
+        jmp .dissasemble_number
+        
+     .send_for_print:
+     cmp edi, 0
+     je .finish_int_print
+     
+     pop eax
+     mov ah, 0x07
+     call print_char
+     dec edi
+     jmp .send_for_print
+        
+     
+    .finish_int_print:
+        mov esp, ebp
+        pop ebp
+        ret 
+            
 
 keyboard_handler:
     push eax
@@ -131,6 +180,16 @@ keyboard_handler:
         pop ebx
         pop eax
         iret
+         
+         
+timer_handler:
+    push eax
+    inc dword [timer_ticks]
+    
+    mov al, 0x20
+    out 0x20, al
+    pop eax
+    iret
 
 
 start:
@@ -141,6 +200,7 @@ start:
     mov fs, ax
     mov gs, ax
     mov ss, ax
+    xor ecx, ecx    ; for later use
     
     mov ebx, keyboard_handler
     
@@ -150,9 +210,20 @@ start:
     mov byte [idt_start + 0x10D], 10001110b
     shr ebx, 16
     mov word [idt_start + 0x10E], bx
+    
+    mov ebx, timer_handler
+    
+    mov word [idt_start + 0x100], bx
+    mov word [idt_start + 0x102], 0x08
+    mov byte [idt_start + 0x104], 0
+    mov byte [idt_start + 0x105], 10001110b
+    shr ebx, 16
+    mov word [idt_start + 0x106], bx  
    
     
     lidt [idt_descriptor]   ; load the IDT address onto the cpu
+    
+    ; ---------------- PIC ----------------
    
     mov al, 0x11        ; reconfiguration mode
 
@@ -176,11 +247,23 @@ start:
     out 0x21, al
     out 0xA1, al
     
-    mov al, 11111101b        ; IRQ1 allowed all other blocked
+    mov al, 11111100b       ; IRQ0 + IRQ1 enabled allowed all other blocked
     out 0x21, al
     
-    mov al, 11111111b
+    mov al, 11111111b       ; All slave IRQs disabled
     out 0xA1, al
+    
+    ; ---------------- PIT ----------------
+    
+    mov al, 0x36
+    out 0x43, al
+    
+    mov ax, 0x2E9B
+    out 0x40, al
+    mov al, ah
+    out 0x40, al
+    
+    ; ---------------- Stack ----------------
     
     mov esp, 0xA000          ; stack grows downward from here
                 
@@ -188,6 +271,11 @@ start:
     
 
 main_loop:
+    
+    xor ebx, ebx
+    xor eax, eax
+    xor edx, edx 
+
     mov al, [keyboard_read_pos]
     cmp al, [keyboard_write_pos]
     je main_loop    ; theres nothing to read from the buffer currently
@@ -338,12 +426,15 @@ scancode_table:
     db ' '                ; 0x39 Space
     db 0                  ; 0x3A Caps Lock                       
 
-
+last_timer_tick dd 0
+timer_ticks dd 0
 shift_pressed db 0
 caps_lock db 0
 
 cursor dd 0
-cursor_col dw 0  
+cursor_col dw 0
+
+seconds dd 0  
 
 keyboard_buffer times 16 db 0
 keyboard_write_pos db 0
