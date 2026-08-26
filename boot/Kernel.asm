@@ -84,7 +84,7 @@ print:
     push ebp
     mov ebp, esp
 
-    mov ah, [ebp + 10]       ; get text attribute
+    mov ah, [ebp + 12]       ; get text attribute
     mov esi, [ebp + 8]       ; get string address
     
     .print:
@@ -192,7 +192,7 @@ timer_handler:
     iret
                
                
-keyboard_print:
+command_line:
     xor ebx, ebx
     mov bl, [keyboard_read_pos]     ; current read from buffer index    
     mov al, [keyboard_buffer + ebx]
@@ -248,6 +248,9 @@ keyboard_print:
 
     inc byte [keyboard_read_pos]
     and byte [keyboard_read_pos], 0x0F  ; read pos = (read pos + 1) % 16 
+    
+    test al, 0x80
+    jnz main_loop
 
     xor ebx, ebx
     mov bl, al
@@ -271,11 +274,50 @@ keyboard_print:
     sub al, 0x20
     
     .normal:
-    
+    mov bx, [input_pos]
     mov ah, 0x07
+    
+    cmp bx, 32
+    jl .no_risk
+    
+    cmp al, 10
+    jne .end
+    
+    .no_risk:
+    
     call print_char
+    
+    cmp al, 10
+    jne .not_end
+    
+    mov [input_buffer + bx], 0  ; its already full of zeros but still we'll keep it
+    call process_cmd
+    jmp .end
+    
+    .not_end:
+    mov [input_buffer + bx], al
+    inc word [input_pos]
+    
+    .end:
     jmp main_loop
     
+    
+process_cmd:
+    push ebp
+    mov ebp, esp
+    mov word [input_pos], 0
+    
+    
+    
+    push 0x07
+    push starting_cmd
+    call print
+    add esp, 8
+    mov esp, ebp
+    pop ebp
+    ret
+     
+     
 sleep:
     push ebp
     mov ebp, esp
@@ -295,6 +337,24 @@ sleep:
         jl .lp
         
     popa    
+    mov esp, ebp
+    pop ebp
+    ret
+    
+clear:
+    push ebp
+    mov ebp, esp
+    
+    xor ecx, ecx
+    
+    .lop:
+    inc ecx
+    mov ah, 0x07
+    mov al, 0
+    call print_char
+    cmp ecx, 2000
+    jne .lop
+    
     mov esp, ebp
     pop ebp
     ret 
@@ -380,13 +440,25 @@ pit_configuration:
     mov esp, 0xA000          ; stack grows downward from here
                 
     sti
+
+prepare_screen:    
+    call clear
+    push 0x07
+    push welcome_msg
+    call print
+    add esp, 8
+        
+    push 0x07
+    push starting_cmd
+    call print
+    add esp, 8
     
 
 main_loop: 
 
     mov al, [keyboard_read_pos]
     cmp al, [keyboard_write_pos]
-    jne keyboard_print    ; theres a value to read from the buffer currently
+    jne command_line    ; theres a value to read from the buffer currently
 
     jmp main_loop
     
@@ -462,5 +534,11 @@ cursor_col dw 0
 keyboard_buffer times 16 db 0
 keyboard_write_pos db 0
 keyboard_read_pos  db 0
+
+input_pos dw 0
+input_buffer times 33 db 0
+starting_cmd db ">> ", 0
+
+welcome_msg db "Hello and welcome to my 32 bit kernel!", 10, "Try writing 'help' into the command line", 10, 0
                       
 times 4096-($-$$) db 0
